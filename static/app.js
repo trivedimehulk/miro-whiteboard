@@ -354,6 +354,7 @@ textInput.addEventListener("keydown", (e) => {
 
 // ---------- Pointer events ----------
 canvas.addEventListener("pointerdown", (e) => {
+  e.preventDefault();
   canvas.setPointerCapture(e.pointerId);
   const { sx, sy } = pointerPos(e);
   const { x, y } = toWorld(sx, sy);
