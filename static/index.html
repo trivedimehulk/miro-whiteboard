@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Whiteboard</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="toolbar">
+    <button class="tool active" data-tool="select" title="Select / Move (V)">&#10548;</button>
+    <button class="tool" data-tool="pen" title="Pen (P)">&#9998;</button>
+    <button class="tool" data-tool="line" title="Line (L)">&#9585;</button>
+    <button class="tool" data-tool="rect" title="Rectangle (R)">&#9633;</button>
+    <button class="tool" data-tool="ellipse" title="Ellipse (O)">&#9675;</button>
+    <button class="tool" data-tool="text" title="Text (T)">T</button>
+    <button class="tool" data-tool="eraser" title="Eraser (E)">&#9938;</button>
+    <button class="tool" data-tool="pan" title="Pan (H)">&#9995;</button>
+    <span class="sep"></span>
+    <input type="color" id="color" value="#1e1e1e" title="Stroke color" />
+    <select id="width" title="Stroke width">
+      <option value="2">Thin</option>
+      <option value="4" selected>Medium</option>
+      <option value="8">Thick</option>
+    </select>
+    <span class="sep"></span>
+    <button id="zoom-out" title="Zoom out">&minus;</button>
+    <span id="zoom-level">100%</span>
+    <button id="zoom-in" title="Zoom in">+</button>
+    <button id="zoom-reset" title="Reset view">&#8634;</button>
+    <span class="sep"></span>
+    <button id="clear" title="Clear board">&#128465;</button>
+    <span id="status" class="disconnected" title="Connection status">&#9679;</span>
+  </div>
+  <canvas id="board"></canvas>
+  <textarea id="text-input" spellcheck="false"></textarea>
+  <script src="app.js"></script>
+</body>
+</html>
