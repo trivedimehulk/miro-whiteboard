@@ -2,12 +2,38 @@
 
 html, body { height: 100%; overflow: hidden; font-family: system-ui, sans-serif; }
 
-#board { display: block; width: 100vw; height: 100vh; background: #f7f7f5; }
+#stage { display: flex; width: 100vw; height: 100vh; }
+
+#board { display: block; flex: 1; min-width: 0; height: 100%; background: #f7f7f5; }
+
+#chat-pane {
+  flex: 0 0 var(--pane-width, 320px);
+  height: 100%;
+  border-left: 1px solid #e3e3e6;
+  background: #fff;
+}
+
+body.chat-collapsed #chat-pane { display: none; }
+
+#chat-unread {
+  position: absolute;
+  top: 0;
+  right: 0;
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: #d64545;
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
+}
+
+#chat-toggle { position: relative; }
 
 #toolbar {
   position: fixed;
   top: 12px;
-  left: 50%;
+  left: calc((100vw - var(--pane-width, 0px)) / 2);
   transform: translateX(-50%);
   display: flex;
   align-items: center;
