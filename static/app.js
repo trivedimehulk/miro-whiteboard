@@ -578,7 +578,15 @@ const chatTransport = {
   getStatus: () => chatStatus,
 };
 
-function setChatBadge(count) {
+let chatOpen = localStorage.getItem("miro-chat-open") !== "false";
+
+// Messages only count as unread while the pane is collapsed.
+function onUnreadChange(count) {
+  if (chatOpen) {
+    chatBadge.hidden = true;
+    chat.markRead();
+    return;
+  }
   chatBadge.hidden = count === 0;
   chatBadge.textContent = count > 9 ? "9+" : String(count);
 }
@@ -588,10 +596,8 @@ const chat = MiroChat.mount(chatPane, {
   user: storedUser(),
   transport: chatTransport,
   title: "Room chat",
-  onUnreadChange: setChatBadge,
+  onUnreadChange,
 });
-
-let chatOpen = localStorage.getItem("miro-chat-open") !== "false";
 
 function applyChatVisibility() {
   document.body.classList.toggle("chat-collapsed", !chatOpen);
