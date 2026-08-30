@@ -389,10 +389,41 @@ textInput.addEventListener("keydown", (e) => {
 });
 
 // ---------- Pointer events ----------
+// Touch pointers are tracked so two fingers pinch-zoom and pan instead of drawing.
+const activePointers = new Map();
+let gesture = null;
+
+function gestureMetrics() {
+  const [a, b] = [...activePointers.values()];
+  return {
+    dist: Math.hypot(a.sx - b.sx, a.sy - b.sy),
+    cx: (a.sx + b.sx) / 2,
+    cy: (a.sy + b.sy) / 2,
+  };
+}
+
+function startGesture() {
+  drawing = null;
+  dragging = null;
+  panning = null;
+  erasedIds = new Set();
+  gesture = { ...gestureMetrics(), scale, offsetX, offsetY };
+  requestRender();
+}
+
+function endPointer(e) {
+  activePointers.delete(e.pointerId);
+  if (activePointers.size < 2) gesture = null;
+}
+
 canvas.addEventListener("pointerdown", (e) => {
   e.preventDefault();
   canvas.setPointerCapture(e.pointerId);
-  const { sx, sy } = pointerPos(e);
+  const pos = pointerPos(e);
+  activePointers.set(e.pointerId, pos);
+  if (activePointers.size === 2) { startGesture(); return; }
+  if (activePointers.size > 2) return;
+  const { sx, sy } = pos;
   const { x, y } = toWorld(sx, sy);
 
   if (editingTextEl) { commitText(); return; }
@@ -436,7 +467,23 @@ canvas.addEventListener("pointerdown", (e) => {
 });
 
 canvas.addEventListener("pointermove", (e) => {
-  const { sx, sy } = pointerPos(e);
+  const pos = pointerPos(e);
+  if (activePointers.has(e.pointerId)) activePointers.set(e.pointerId, pos);
+
+  if (gesture && activePointers.size >= 2) {
+    const now = gestureMetrics();
+    const factor = gesture.dist > 0 ? now.dist / gesture.dist : 1;
+    scale = Math.max(0.1, Math.min(5, gesture.scale * factor));
+    const worldX = (gesture.cx - gesture.offsetX) / gesture.scale;
+    const worldY = (gesture.cy - gesture.offsetY) / gesture.scale;
+    offsetX = now.cx - worldX * scale;
+    offsetY = now.cy - worldY * scale;
+    zoomLabel.textContent = Math.round(scale * 100) + "%";
+    requestRender();
+    return;
+  }
+
+  const { sx, sy } = pos;
   const { x, y } = toWorld(sx, sy);
 
   throttledCursor(x, y);
@@ -473,7 +520,12 @@ canvas.addEventListener("pointermove", (e) => {
   requestRender();
 });
 
-canvas.addEventListener("pointerup", () => {
+canvas.addEventListener("pointercancel", endPointer);
+
+canvas.addEventListener("pointerup", (e) => {
+  const wasGesture = gesture !== null;
+  endPointer(e);
+  if (wasGesture) { drawing = null; panning = null; return; }
   if (panning) {
     panning = null;
     setTool(tool);
@@ -578,7 +630,10 @@ const chatTransport = {
   getStatus: () => chatStatus,
 };
 
-let chatOpen = localStorage.getItem("miro-chat-open") !== "false";
+const narrowScreen = window.matchMedia("(max-width: 760px)");
+const storedChatOpen = localStorage.getItem("miro-chat-open");
+// Phones start with the board visible; the pane is an overlay they open on demand.
+let chatOpen = storedChatOpen === null ? !narrowScreen.matches : storedChatOpen !== "false";
 
 // Messages only count as unread while the pane is collapsed.
 function onUnreadChange(count) {
@@ -601,7 +656,9 @@ const chat = MiroChat.mount(chatPane, {
 
 function applyChatVisibility() {
   document.body.classList.toggle("chat-collapsed", !chatOpen);
-  document.documentElement.style.setProperty("--pane-width", chatOpen ? "320px" : "0px");
+  // On phones the pane overlays the board instead of shrinking it.
+  const paneWidth = chatOpen && !narrowScreen.matches ? "320px" : "0px";
+  document.documentElement.style.setProperty("--pane-width", paneWidth);
   chatToggle.classList.toggle("active", chatOpen);
   if (chatOpen) chat.markRead();
   resize();
@@ -614,6 +671,8 @@ function toggleChat() {
 }
 
 chatToggle.addEventListener("click", toggleChat);
+document.getElementById("chat-close").addEventListener("click", toggleChat);
+narrowScreen.addEventListener("change", applyChatVisibility);
 
 // ---------- Init ----------
 applyChatVisibility();

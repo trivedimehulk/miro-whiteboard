@@ -118,4 +118,13 @@ Error generating stack: `+u.message+`
   padding: 0 14px; font: inherit; font-weight: 600; cursor: pointer;
 }
 .mc-send:disabled { background: #c3c9de; cursor: default; }
+
+/* Touch layout: bigger tap targets, and a 16px input so mobile Safari/Chrome don't zoom on focus. */
+@media (max-width: 760px) {
+  .mc-header { padding: 12px; padding-right: 48px; }
+  .mc-bubble-wrap { max-width: 88%; }
+  .mc-composer { padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); }
+  .mc-input { font-size: 16px; min-height: 42px; }
+  .mc-send { padding: 0 18px; min-height: 42px; }
+}
 `,dc="miro-chat-styles";function pc(e=document){if(e.getElementById(dc))return;const t=e.createElement("style");t.id=dc,t.textContent=fc,e.head.appendChild(t)}function qd(e,t={}){const n=typeof e=="string"?document.querySelector(e):e;if(!n)throw new Error(`miro-chat: mount target not found: ${String(e)}`);pc(n.ownerDocument??document);const r=t.roomId??"default",l=!t.transport,u=t.transport??new ac(t.wsUrl??cc());let i=rc(t.user),o=0,s=0,c=ba(n);const h=p=>{var g;p!==o&&(o=p,(g=t.onUnreadChange)==null||g.call(t,o))},m=()=>{c==null||c.render(j.jsx(U.StrictMode,{children:j.jsx(sc,{transport:u,roomId:r,user:i,title:t.title??"Room chat",onMessagesChange:p=>{p>s&&h(o+(p-s)),s=p}})}))};return m(),{unmount(){var p;c==null||c.unmount(),c=null,l&&((p=u.close)==null||p.call(u))},markRead(){h(0)},setUser(p){i=rc({...i,...p}),m()}}}return Ae.CSS=fc,Ae.ChatApp=sc,Ae.WebSocketTransport=ac,Ae.defaultWsUrl=cc,Ae.injectStyles=pc,Ae.mount=qd,Ae.useChat=ic,Object.defineProperty(Ae,Symbol.toStringTag,{value:"Module"}),Ae}({});
