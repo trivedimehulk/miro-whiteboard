@@ -14,6 +14,9 @@ frontend and a small Python WebSocket server on the backend.
 - Zoom (Ctrl+scroll / pinch, or toolbar +/- buttons)
 - Real-time multi-user collaboration over WebSockets, including live cursors
 - Board state kept on the server, so new joiners see the current board
+- Room chat in the right-side pane (the [miro-chat](https://github.com/trivedimehulk/miro-chat)
+  React micro-frontend applet), with history, presence, typing indicators and an
+  unread badge
 
 ## Keyboard shortcuts
 
@@ -28,6 +31,7 @@ frontend and a small Python WebSocket server on the backend.
 | E | Eraser |
 | H | Pan |
 | Space (hold) | Temporary pan |
+| C | Toggle the chat pane |
 
 ## Running
 
@@ -52,3 +56,25 @@ network) to collaborate in real time.
   `rect`, `ellipse`, `text`) identified by random ids.
 
 Protocol messages: `init`, `add`, `update`, `delete`, `clear`, `cursor`, `leave`.
+
+## Chat pane
+
+The chat pane is the `miro-chat` applet, vendored as a single bundle at
+`static/chat/miro-chat.applet.js` and mounted by `app.js`:
+
+```js
+MiroChat.mount(chatPane, { roomId, user, transport: chatTransport, onUnreadChange });
+```
+
+It does **not** open its own socket — `app.js` passes a transport backed by the
+board's existing WebSocket, and the server routes `chat:*` frames
+(`chat:join`, `chat:message`, `chat:typing` in; `chat:history`, `chat:message`,
+`chat:presence`, `chat:typing` out) to the chat room handler. Chat history and
+presence are kept per room id in memory; the room defaults to `main-board` and
+can be overridden with `?room=<id>`.
+
+To pick up applet changes, rebuild the bundle from a `miro-chat` checkout:
+
+```bash
+scripts/update-chat-applet.sh ../miro-chat
+```

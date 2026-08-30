@@ -30,10 +30,16 @@
     <button id="zoom-reset" title="Reset view">&#8634;</button>
     <span class="sep"></span>
     <button id="clear" title="Clear board">&#128465;</button>
+    <button id="chat-toggle" title="Room chat (C)">&#128172;<span id="chat-unread" hidden></span></button>
     <span id="status" class="disconnected" title="Connection status">&#9679;</span>
   </div>
-  <canvas id="board"></canvas>
+  <div id="stage">
+    <canvas id="board"></canvas>
+    <aside id="chat-pane"></aside>
+  </div>
+  <button id="chat-close" title="Close chat">&#10005;</button>
   <textarea id="text-input" spellcheck="false"></textarea>
+  <script src="chat/miro-chat.applet.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -1,7 +1,9 @@
 """Collaborative whiteboard server.
 
 Serves the static frontend and a WebSocket endpoint (/ws) on a single port.
-Board state is kept in memory and broadcast to all connected clients.
+Board state is kept in memory and broadcast to all connected clients. The same
+socket also carries the room chat protocol (`chat:*`) used by the miro-chat
+applet mounted in the right-side pane.
 
 Usage: python3 server.py [--host 0.0.0.0] [--port 8000]
 """
@@ -12,6 +14,7 @@ import http
 import json
 import mimetypes
 import uuid
+from collections import defaultdict
 from pathlib import Path
 
 from websockets.asyncio.server import serve
@@ -20,8 +23,12 @@ from websockets.datastructures import Headers
 
 STATIC_DIR = Path(__file__).parent / "static"
 
+CHAT_HISTORY_LIMIT = 200
+
 elements: dict[str, dict] = {}
 clients: dict = {}
+chat_history: dict[str, list[dict]] = defaultdict(list)
+chat_members: dict[str, dict] = defaultdict(dict)  # room id -> {connection: user}
 
 
 def serve_static(connection, request):
@@ -50,8 +57,12 @@ def serve_static(connection, request):
 
 
 async def broadcast(message: dict, exclude=None):
+    await send_to(list(clients), message, exclude)
+
+
+async def send_to(connections, message: dict, exclude=None):
     data = json.dumps(message)
-    for ws in list(clients):
+    for ws in connections:
         if ws is not exclude:
             try:
                 await ws.send(data)
@@ -59,9 +70,44 @@ async def broadcast(message: dict, exclude=None):
                 pass
 
 
+async def broadcast_presence(room_id: str):
+    await send_to(list(chat_members[room_id]), {
+        "type": "chat:presence",
+        "roomId": room_id,
+        "users": list(chat_members[room_id].values()),
+    })
+
+
+async def handle_chat(ws, msg: dict, joined_rooms: set[str]) -> None:
+    room_id = msg.get("roomId")
+    if not isinstance(room_id, str):
+        return
+    msg_type = msg["type"]
+
+    if msg_type == "chat:join":
+        chat_members[room_id][ws] = msg.get("user") or {}
+        joined_rooms.add(room_id)
+        await ws.send(json.dumps({
+            "type": "chat:history",
+            "roomId": room_id,
+            "messages": chat_history[room_id],
+        }))
+        await broadcast_presence(room_id)
+    elif msg_type == "chat:message":
+        message = msg.get("message")
+        if not isinstance(message, dict) or not message.get("id"):
+            return
+        chat_history[room_id].append(message)
+        del chat_history[room_id][:-CHAT_HISTORY_LIMIT]
+        await send_to(list(chat_members[room_id]), msg, exclude=ws)
+    elif msg_type == "chat:typing":
+        await send_to(list(chat_members[room_id]), msg, exclude=ws)
+
+
 async def handler(ws):
     client_id = uuid.uuid4().hex[:8]
     clients[ws] = client_id
+    joined_rooms: set[str] = set()
     try:
         await ws.send(json.dumps({
             "type": "init",
@@ -87,8 +133,13 @@ async def handler(ws):
             elif msg_type == "cursor":
                 msg["clientId"] = client_id
                 await broadcast(msg, exclude=ws)
+            elif isinstance(msg_type, str) and msg_type.startswith("chat:"):
+                await handle_chat(ws, msg, joined_rooms)
     finally:
         clients.pop(ws, None)
+        for room_id in joined_rooms:
+            chat_members[room_id].pop(ws, None)
+            await broadcast_presence(room_id)
         await broadcast({"type": "leave", "clientId": client_id})
 
 

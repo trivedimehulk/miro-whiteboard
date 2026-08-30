@@ -28,6 +28,18 @@ let clientId = null;
 // ---------- WebSocket ----------
 let ws = null;
 
+// Chat rides this same socket: `chat:*` frames are handed to the miro-chat
+// applet, everything else is board traffic.
+const chatListeners = new Set();
+const chatStatusListeners = new Set();
+
+function emitChatStatus(status) {
+  chatStatus = status;
+  chatStatusListeners.forEach((fn) => fn(status));
+}
+
+let chatStatus = "connecting";
+
 function connect() {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   ws = new WebSocket(`${proto}//${location.host}/ws`);
@@ -35,14 +47,21 @@ function connect() {
   ws.onopen = () => {
     statusDot.classList.remove("disconnected");
     statusDot.classList.add("connected");
+    emitChatStatus("connected");
+    flushChatQueue();
   };
   ws.onclose = () => {
     statusDot.classList.remove("connected");
     statusDot.classList.add("disconnected");
+    emitChatStatus("disconnected");
     setTimeout(connect, 1500);
   };
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
+    if (typeof msg.type === "string" && msg.type.startsWith("chat:")) {
+      chatListeners.forEach((fn) => fn(msg));
+      return;
+    }
     switch (msg.type) {
       case "init":
         clientId = msg.clientId;
@@ -71,6 +90,19 @@ function connect() {
 
 function send(msg) {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+}
+
+// Chat messages typed while offline are replayed once the socket is back.
+const chatQueue = [];
+
+function sendChat(msg) {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+  else chatQueue.push(msg);
+}
+
+function flushChatQueue() {
+  const pending = chatQueue.splice(0, chatQueue.length);
+  pending.forEach(sendChat);
 }
 
 connect();
@@ -164,10 +196,13 @@ function requestRender() {
   }
 }
 
+function viewWidth() { return canvas.clientWidth; }
+function viewHeight() { return canvas.clientHeight; }
+
 function resize() {
   const dpr = window.devicePixelRatio || 1;
-  canvas.width = window.innerWidth * dpr;
-  canvas.height = window.innerHeight * dpr;
+  canvas.width = viewWidth() * dpr;
+  canvas.height = viewHeight() * dpr;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   requestRender();
 }
@@ -218,7 +253,7 @@ function drawGrid() {
   const step = 40 * scale;
   if (step < 8) return;
   ctx.fillStyle = "#d5d5d0";
-  const w = window.innerWidth, h = window.innerHeight;
+  const w = viewWidth(), h = viewHeight();
   for (let x = offsetX % step; x < w; x += step) {
     for (let y = offsetY % step; y < h; y += step) {
       ctx.fillRect(x - 1, y - 1, 2, 2);
@@ -228,7 +263,7 @@ function drawGrid() {
 
 function render() {
   ctx.save();
-  ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+  ctx.clearRect(0, 0, viewWidth(), viewHeight());
   drawGrid();
   ctx.translate(offsetX, offsetY);
   ctx.scale(scale, scale);
@@ -288,9 +323,9 @@ function setZoom(newScale, cx, cy) {
 }
 
 document.getElementById("zoom-in").addEventListener("click", () =>
-  setZoom(scale * 1.2, window.innerWidth / 2, window.innerHeight / 2));
+  setZoom(scale * 1.2, viewWidth() / 2, viewHeight() / 2));
 document.getElementById("zoom-out").addEventListener("click", () =>
-  setZoom(scale / 1.2, window.innerWidth / 2, window.innerHeight / 2));
+  setZoom(scale / 1.2, viewWidth() / 2, viewHeight() / 2));
 document.getElementById("zoom-reset").addEventListener("click", () => {
   scale = 1; offsetX = 0; offsetY = 0;
   zoomLabel.textContent = "100%";
@@ -301,6 +336,7 @@ document.getElementById("zoom-reset").addEventListener("click", () => {
 window.addEventListener("keydown", (e) => {
   if (e.target === textInput) return;
   if (e.code === "Space") { spaceDown = true; canvas.style.cursor = "grab"; e.preventDefault(); return; }
+  if (e.key.toLowerCase() === "c" && !e.ctrlKey && !e.metaKey) { toggleChat(); return; }
   const keys = { v: "select", p: "pen", l: "line", r: "rect", o: "ellipse", t: "text", e: "eraser", h: "pan" };
   const t = keys[e.key.toLowerCase()];
   if (t && !e.ctrlKey && !e.metaKey) setTool(t);
@@ -353,10 +389,41 @@ textInput.addEventListener("keydown", (e) => {
 });
 
 // ---------- Pointer events ----------
+// Touch pointers are tracked so two fingers pinch-zoom and pan instead of drawing.
+const activePointers = new Map();
+let gesture = null;
+
+function gestureMetrics() {
+  const [a, b] = [...activePointers.values()];
+  return {
+    dist: Math.hypot(a.sx - b.sx, a.sy - b.sy),
+    cx: (a.sx + b.sx) / 2,
+    cy: (a.sy + b.sy) / 2,
+  };
+}
+
+function startGesture() {
+  drawing = null;
+  dragging = null;
+  panning = null;
+  erasedIds = new Set();
+  gesture = { ...gestureMetrics(), scale, offsetX, offsetY };
+  requestRender();
+}
+
+function endPointer(e) {
+  activePointers.delete(e.pointerId);
+  if (activePointers.size < 2) gesture = null;
+}
+
 canvas.addEventListener("pointerdown", (e) => {
   e.preventDefault();
   canvas.setPointerCapture(e.pointerId);
-  const { sx, sy } = pointerPos(e);
+  const pos = pointerPos(e);
+  activePointers.set(e.pointerId, pos);
+  if (activePointers.size === 2) { startGesture(); return; }
+  if (activePointers.size > 2) return;
+  const { sx, sy } = pos;
   const { x, y } = toWorld(sx, sy);
 
   if (editingTextEl) { commitText(); return; }
@@ -400,7 +467,23 @@ canvas.addEventListener("pointerdown", (e) => {
 });
 
 canvas.addEventListener("pointermove", (e) => {
-  const { sx, sy } = pointerPos(e);
+  const pos = pointerPos(e);
+  if (activePointers.has(e.pointerId)) activePointers.set(e.pointerId, pos);
+
+  if (gesture && activePointers.size >= 2) {
+    const now = gestureMetrics();
+    const factor = gesture.dist > 0 ? now.dist / gesture.dist : 1;
+    scale = Math.max(0.1, Math.min(5, gesture.scale * factor));
+    const worldX = (gesture.cx - gesture.offsetX) / gesture.scale;
+    const worldY = (gesture.cy - gesture.offsetY) / gesture.scale;
+    offsetX = now.cx - worldX * scale;
+    offsetY = now.cy - worldY * scale;
+    zoomLabel.textContent = Math.round(scale * 100) + "%";
+    requestRender();
+    return;
+  }
+
+  const { sx, sy } = pos;
   const { x, y } = toWorld(sx, sy);
 
   throttledCursor(x, y);
@@ -437,7 +520,12 @@ canvas.addEventListener("pointermove", (e) => {
   requestRender();
 });
 
-canvas.addEventListener("pointerup", () => {
+canvas.addEventListener("pointercancel", endPointer);
+
+canvas.addEventListener("pointerup", (e) => {
+  const wasGesture = gesture !== null;
+  endPointer(e);
+  if (wasGesture) { drawing = null; panning = null; return; }
   if (panning) {
     panning = null;
     setTool(tool);
@@ -506,6 +594,87 @@ function throttledUpdate(el) {
   }
 }
 
+// ---------- Chat pane ----------
+const chatPane = document.getElementById("chat-pane");
+const chatToggle = document.getElementById("chat-toggle");
+const chatBadge = document.getElementById("chat-unread");
+
+// The room id keeps chat scoped to the board being viewed (?room=...).
+const roomId = new URLSearchParams(location.search).get("room") || "main-board";
+
+function storedUser() {
+  let user;
+  try {
+    user = JSON.parse(localStorage.getItem("miro-chat-user") || "null");
+  } catch { user = null; }
+  if (!user || !user.id) {
+    user = { id: Math.random().toString(36).slice(2, 10) };
+    user.name = "Guest " + user.id.slice(0, 4);
+    try { localStorage.setItem("miro-chat-user", JSON.stringify(user)); } catch { /* private mode */ }
+  }
+  return user;
+}
+
+// The applet talks to the room through the board's existing socket instead of
+// opening a second connection.
+const chatTransport = {
+  send: sendChat,
+  subscribe(listener) {
+    chatListeners.add(listener);
+    return () => chatListeners.delete(listener);
+  },
+  onStatusChange(listener) {
+    chatStatusListeners.add(listener);
+    return () => chatStatusListeners.delete(listener);
+  },
+  getStatus: () => chatStatus,
+};
+
+const narrowScreen = window.matchMedia("(max-width: 760px)");
+const storedChatOpen = localStorage.getItem("miro-chat-open");
+// Phones start with the board visible; the pane is an overlay they open on demand.
+let chatOpen = storedChatOpen === null ? !narrowScreen.matches : storedChatOpen !== "false";
+
+// Messages only count as unread while the pane is collapsed.
+function onUnreadChange(count) {
+  if (chatOpen) {
+    chatBadge.hidden = true;
+    chat.markRead();
+    return;
+  }
+  chatBadge.hidden = count === 0;
+  chatBadge.textContent = count > 9 ? "9+" : String(count);
+}
+
+const chat = MiroChat.mount(chatPane, {
+  roomId,
+  user: storedUser(),
+  transport: chatTransport,
+  title: "Room chat",
+  onUnreadChange,
+});
+
+function applyChatVisibility() {
+  document.body.classList.toggle("chat-collapsed", !chatOpen);
+  // On phones the pane overlays the board instead of shrinking it.
+  const paneWidth = chatOpen && !narrowScreen.matches ? "320px" : "0px";
+  document.documentElement.style.setProperty("--pane-width", paneWidth);
+  chatToggle.classList.toggle("active", chatOpen);
+  if (chatOpen) chat.markRead();
+  resize();
+}
+
+function toggleChat() {
+  chatOpen = !chatOpen;
+  try { localStorage.setItem("miro-chat-open", String(chatOpen)); } catch { /* private mode */ }
+  applyChatVisibility();
+}
+
+chatToggle.addEventListener("click", toggleChat);
+document.getElementById("chat-close").addEventListener("click", toggleChat);
+narrowScreen.addEventListener("change", applyChatVisibility);
+
 // ---------- Init ----------
+applyChatVisibility();
 resize();
 setTool("select");
